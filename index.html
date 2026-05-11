@@ -28,7 +28,7 @@
       text-shadow: 1px 1px 0 #001025;
     }
     canvas {
-      background: linear-gradient(180deg, #2a6dad 0%, #5fa3d2 50%, #8fc8e8 100%);
+      background: linear-gradient(180deg, #6b8e4e 0%, #4d6a35 100%);
       border: 3px solid #ffd040; border-radius: 4px;
       box-shadow: 0 0 0 2px #001025, 0 0 30px rgba(255, 208, 64, 0.25);
       image-rendering: pixelated; image-rendering: -moz-crisp-edges;
@@ -182,7 +182,7 @@
     let player, bullets, enemies, particles, score, lives, gameOver, started;
     let keys = {}, touchActive = false;
     let spawnTimer = 0, frameCount = 0;
-    let clouds = [];
+    let landFeatures = [];  // 위에서 본 땅 풍경 (숲/호수/논밭/도로)
     let stage, stageProgress, stageSpawnCount;
     let bannerActive, bannerPhase, bannerTimer;
     let gameComplete, endingTimer;
@@ -201,17 +201,49 @@
     started = false;
     bannerActive = false; // hide until game starts
 
-    // Clouds
-    function makeCloud(initialY) {
-      return {
-        x: Math.random() * W,
-        y: initialY !== undefined ? initialY : Math.random() * H,
-        size: 25 + Math.random() * 55,
-        speed: 0.4 + Math.random() * 0.7,
-        alpha: 0.55 + Math.random() * 0.35,
+    // Forest patches (top-down scrolling terrain)
+    function makeLandFeature(initialY) {
+      // Vary size: mix of small clusters and large forests
+      const big = Math.random() < 0.35;
+      const f = {
+        type: 'forest',
+        speed: 1.6 + Math.random() * 1.0,
+        w: big ? (80 + Math.random() * 90) : (35 + Math.random() * 50),
+        h: big ? (70 + Math.random() * 80) : (30 + Math.random() * 45),
       };
+      f.x = Math.random() * (W + 40) - 20;
+      f.y = initialY !== undefined ? initialY : -f.h - 20;
+      // Pick a forest shade variant so the canopy isn't all identical
+      f.base = ['#2d5a2d', '#264a26', '#316234', '#284f2c'][Math.floor(Math.random() * 4)];
+      f.dark = '#1a3a1a';
+      // Pre-generated darker tree spots
+      f.spots = [];
+      const cnt = Math.floor(f.w * f.h / 200);
+      for (let i = 0; i < cnt; i++) {
+        f.spots.push({
+          dx: Math.random() * f.w,
+          dy: Math.random() * f.h,
+          size: 2 + Math.floor(Math.random() * 3),
+        });
+      }
+      return f;
     }
-    for (let i = 0; i < 10; i++) clouds.push(makeCloud());
+    // Pre-populate forests across the screen (more forests now)
+    for (let i = 0; i < 22; i++) {
+      landFeatures.push(makeLandFeature(Math.random() * H * 1.4 - 200));
+    }
+
+    // Ground texture dots (give the base color a grass/dirt feel)
+    const groundDots = [];
+    for (let i = 0; i < 140; i++) {
+      groundDots.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 1 + Math.floor(Math.random() * 2),       // 1-2 px
+        color: ['#5a7a3a', '#3a5a25', '#7a9a55', '#6a5a3a', '#5a6a30'][Math.floor(Math.random() * 5)],
+        speed: 1.8 + Math.random() * 0.9,
+      });
+    }
 
     // ===== Input: keyboard =====
     document.addEventListener('keydown', (e) => {
@@ -300,13 +332,20 @@
     // ===== Update =====
     function update() {
       frameCount++;
-      clouds.forEach(c => {
-        c.y += c.speed;
-        if (c.y > H + 60) {
-          c.y = -80; c.x = Math.random() * W;
-          c.size = 25 + Math.random() * 55;
-          c.speed = 0.4 + Math.random() * 0.7;
-          c.alpha = 0.55 + Math.random() * 0.35;
+      // Scroll forest patches downward (we're flying forward over land)
+      landFeatures.forEach(f => {
+        f.y += f.speed;
+        if (f.y > H + 100) {
+          // Recycle: respawn at top with new random characteristics
+          Object.assign(f, makeLandFeature(-100 - Math.random() * 80));
+        }
+      });
+      // Scroll ground texture dots
+      groundDots.forEach(d => {
+        d.y += d.speed;
+        if (d.y > H + 4) {
+          d.y = -2;
+          d.x = Math.random() * W;
         }
       });
 
@@ -448,13 +487,27 @@
     }
 
     // ===== Drawing helpers =====
-    function drawCloud(c) {
-      ctx.fillStyle = `rgba(255, 255, 255, ${c.alpha})`;
-      const cx = Math.floor(c.x), cy = Math.floor(c.y), s = Math.floor(c.size);
-      ctx.fillRect(cx - Math.floor(s*0.5), cy + Math.floor(s*0.05), s, Math.floor(s*0.25));
-      ctx.fillRect(cx - Math.floor(s*0.4), cy - Math.floor(s*0.12), Math.floor(s*0.8), Math.floor(s*0.22));
-      ctx.fillRect(cx - Math.floor(s*0.25), cy - Math.floor(s*0.3), Math.floor(s*0.5), Math.floor(s*0.22));
-      ctx.fillRect(cx - Math.floor(s*0.1), cy - Math.floor(s*0.42), Math.floor(s*0.3), Math.floor(s*0.18));
+    function drawLandFeature(f) {
+      const fx = Math.floor(f.x), fy = Math.floor(f.y);
+      const fw = Math.floor(f.w), fh = Math.floor(f.h);
+      // Forest: green irregular blob with darker tree spots
+      ctx.fillStyle = f.base || '#2d5a2d';
+      ctx.fillRect(fx + Math.floor(fw*0.1), fy + Math.floor(fh*0.15), Math.floor(fw*0.8), Math.floor(fh*0.7));
+      ctx.fillRect(fx + Math.floor(fw*0.2), fy + Math.floor(fh*0.05), Math.floor(fw*0.6), Math.floor(fh*0.9));
+      ctx.fillRect(fx, fy + Math.floor(fh*0.3), Math.floor(fw*0.4), Math.floor(fh*0.4));
+      ctx.fillRect(fx + Math.floor(fw*0.6), fy + Math.floor(fh*0.3), Math.floor(fw*0.4), Math.floor(fh*0.4));
+      // Darker tree clusters for texture
+      ctx.fillStyle = f.dark || '#1a3a1a';
+      if (f.spots) f.spots.forEach(s => {
+        ctx.fillRect(fx + Math.floor(s.dx), fy + Math.floor(s.dy), s.size, s.size);
+      });
+    }
+
+    function drawGroundDots() {
+      groundDots.forEach(d => {
+        ctx.fillStyle = d.color;
+        ctx.fillRect(Math.floor(d.x), Math.floor(d.y), d.size, d.size);
+      });
     }
 
     function drawPlayer() {
@@ -823,12 +876,12 @@
     function draw() {
       // Sky gradient
       const grad = ctx.createLinearGradient(0, 0, 0, H);
-      grad.addColorStop(0, '#2a6dad');
-      grad.addColorStop(0.5, '#5fa3d2');
-      grad.addColorStop(1, '#8fc8e8');
+      grad.addColorStop(0, '#6b8e4e');   // top: lighter green
+      grad.addColorStop(1, '#4d6a35');   // bottom: deeper green
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, W, H);
-      clouds.forEach(drawCloud);
+      drawGroundDots();                  // grass/dirt texture on bare ground
+      landFeatures.forEach(drawLandFeature); // forests on top of texture
 
       if (!started) { drawStartScreen(); return; }
 
