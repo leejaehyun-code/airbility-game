@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, maximum-scale=1">
+  <title>AIRBILITY - Drone Intercept</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      background: #000; color: #fff;
+      font-family: 'Press Start 2P', 'Courier New', monospace;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      user-select: none; -webkit-user-select: none; touch-action: none;
+    }
+    h1 {
+      font-size: 0.85rem; margin-bottom: 0.5rem; letter-spacing: 0.1em;
+      color: #ffd040; text-align: center;
+      text-shadow: 2px 2px 0 #001025, 0 0 12px rgba(255, 208, 64, 0.4);
+    }
+    .info {
+      font-size: 0.45rem; color: #80f0ff; margin-bottom: 0.6rem;
+      text-align: center; line-height: 1.8; letter-spacing: 0.05em;
+      text-shadow: 1px 1px 0 #001025;
+    }
+    canvas {
+      background: linear-gradient(180deg, #2a6dad 0%, #5fa3d2 50%, #8fc8e8 100%);
+      border: 3px solid #ffd040; border-radius: 4px;
+      box-shadow: 0 0 0 2px #001025, 0 0 30px rgba(255, 208, 64, 0.25);
+      image-rendering: pixelated; image-rendering: -moz-crisp-edges;
+      display: block; max-width: 95vw; max-height: 80vh;
+      width: auto; height: auto; touch-action: none;
+    }
+    @media (max-width: 600px) {
+      h1 { font-size: 0.7rem; margin-bottom: 0.3rem; }
+      .info { font-size: 0.4rem; margin-bottom: 0.3rem; }
+      canvas { max-height: 86vh; }
+    }
+  </style>
+</head>
+<body>
+  <h1>AIRBILITY · DRONE INTERCEPT</h1>
+  <div class="info">
+    PC: &nbsp;ARROW KEYS · SPACE TO FIRE<br>
+    MOBILE: &nbsp;DRAG LEFT/RIGHT · AUTO FIRE
+  </div>
+  <canvas id="game" width="480" height="720"></canvas>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const W = canvas.width, H = canvas.height;
+    const PIXEL_FONT = '"Press Start 2P", "Courier New", monospace';
+    const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (document.fonts && document.fonts.load) document.fonts.load('14px "Press Start 2P"');
+
+    // ===== Sprite helper =====
+    function createSprite(map, palette) {
+      const s = document.createElement('canvas');
+      s.width = map[0].length; s.height = map.length;
+      const sx = s.getContext('2d');
+      for (let y = 0; y < map.length; y++) {
+        for (let x = 0; x < map[y].length; x++) {
+          const c = map[y][x];
+          if (palette[c]) { sx.fillStyle = palette[c]; sx.fillRect(x, y, 1, 1); }
+        }
+      }
+      return s;
+    }
+
+    // ===== Player (24×24 → 72×72) =====
+    const PLAYER_PALETTE = {
+      'W': '#e8e8f0', 'S': '#90909c', 'D': '#1a1a24',
+      'B': '#000000', 'K': '#0a0a14',
+      'R': '#ff3030', 'G': '#28e060',
+    };
+    const PLAYER_MAP = [
+      "                        ",
+      "           BB           ",
+      "           BB           ",
+      "           BB           ",
+      "          WWWW          ",
+      "          WWWW          ",
+      "          WDDW          ",
+      "          WDDW          ",
+      "      SSSSWDDWSSSS      ",
+      "      SKKSWDDWSKKS      ",
+      "      SKKSWDDWSKKS      ",
+      "      SSSSWDDWSSSS      ",
+      "          WDDW          ",
+      "RWWWWWWWWWWDDWWWWWWWWWWG",
+      "RWWWWWWWWWWDDWWWWWWWWWWG",
+      "          WWWW          ",
+      "      SSSSWWWWSSSS      ",
+      "      SKKSWWWWSKKS      ",
+      "      SKKSWWWWSKKS      ",
+      "      SSSSWWWWSSSS      ",
+      "          WWWW          ",
+      "         WWWWWW         ",
+      "        WW    WW        ",
+      "      WW        WW      ",
+    ];
+    const playerSprite = createSprite(PLAYER_MAP, PLAYER_PALETTE);
+
+    // ===== Enemy: animated quadcopter (13×13 → 26×26) =====
+    // Two frames alternating for spinning propeller effect
+    const ENEMY_PALETTE = {
+      'K': '#0e0e14', 'M': '#3a3a48',
+      'D': '#5a1414', 'R': '#e02828', 'Y': '#ffe800',
+    };
+    // Frame A: rotor blades in + (cross) position
+    const ENEMY_MAP_A = [
+      " KK       KK ",  //  0
+      "KMMK     KMMK",  //  1
+      " KK       KK ",  //  2
+      "  DD     DD  ",  //  3
+      "   DD   DD   ",  //  4
+      "    DDDDD    ",  //  5
+      "    DYRYD    ",  //  6
+      "    DDDDD    ",  //  7
+      "   DD   DD   ",  //  8
+      "  DD     DD  ",  //  9
+      " KK       KK ",  // 10
+      "KMMK     KMMK",  // 11
+      " KK       KK ",  // 12
+    ];
+    // Frame B: rotor blades in X (diagonal) position
+    const ENEMY_MAP_B = [
+      "K  K     K  K",  //  0
+      " MM       MM ",  //  1
+      "K  K     K  K",  //  2
+      "  DD     DD  ",  //  3
+      "   DD   DD   ",  //  4
+      "    DDDDD    ",  //  5
+      "    DYRYD    ",  //  6
+      "    DDDDD    ",  //  7
+      "   DD   DD   ",  //  8
+      "  DD     DD  ",  //  9
+      "K  K     K  K",  // 10
+      " MM       MM ",  // 11
+      "K  K     K  K",  // 12
+    ];
+    const enemySpriteA = createSprite(ENEMY_MAP_A, ENEMY_PALETTE);
+    const enemySpriteB = createSprite(ENEMY_MAP_B, ENEMY_PALETTE);
+
+    // ===== Catcher drone (11×11 → 22×22) =====
+    const BULLET_PALETTE = {
+      'Y': '#ffd000', 'O': '#7a5800',
+      'L': '#ffe040', 'C': '#ffffff',
+    };
+    const BULLET_MAP = [
+      "YYY     YYY",
+      "YOY     YOY",
+      "YYY     YYY",
+      "  LL   LL  ",
+      "   LLLLL   ",
+      "   LCCCL   ",
+      "   LLLLL   ",
+      "  LL   LL  ",
+      "YYY     YYY",
+      "YOY     YOY",
+      "YYY     YYY",
+    ];
+    const bulletSprite = createSprite(BULLET_MAP, BULLET_PALETTE);
+
+    // ===== Stage configuration (1.5× harder) =====
+    const STAGES = [
+      { num: 1, target: 10, speedMul: 1.35, spawnFrames: 68, scoreReward: 10 },
+      { num: 2, target: 14, speedMul: 1.65, spawnFrames: 56, scoreReward: 15 },
+      { num: 3, target: 17, speedMul: 2.00, spawnFrames: 46, scoreReward: 20 },
+      { num: 4, target: 20, speedMul: 2.30, spawnFrames: 38, scoreReward: 25 },
+      { num: 5, target: 24, speedMul: 2.60, spawnFrames: 30, scoreReward: 30 },
+    ];
+    function getStage() { return STAGES[stage - 1]; }
+
+    // ===== Game state =====
+    let player, bullets, enemies, particles, score, lives, gameOver, started;
+    let keys = {}, touchActive = false;
+    let spawnTimer = 0, frameCount = 0;
+    let clouds = [];
+    let stage, stageProgress, stageSpawnCount;
+    let bannerActive, bannerPhase, bannerTimer;
+    let gameComplete, endingTimer;
+
+    function reset() {
+      player = { x: W/2 - 36, y: H - 95, w: 72, h: 72, speed: 6, cooldown: 0 };
+      bullets = []; enemies = []; particles = [];
+      score = 0; lives = 3;
+      gameOver = false; gameComplete = false;
+      spawnTimer = 0;
+      stage = 1; stageProgress = 0; stageSpawnCount = 0;
+      bannerActive = true; bannerPhase = 'starting'; bannerTimer = 100;
+      endingTimer = 0;
+    }
+    reset();
+    started = false;
+    bannerActive = false; // hide until game starts
+
+    // Clouds
+    function makeCloud(initialY) {
+      return {
+        x: Math.random() * W,
+        y: initialY !== undefined ? initialY : Math.random() * H,
+        size: 25 + Math.random() * 55,
+        speed: 0.4 + Math.random() * 0.7,
+        alpha: 0.55 + Math.random() * 0.35,
+      };
+    }
+    for (let i = 0; i < 10; i++) clouds.push(makeCloud());
+
+    // ===== Input: keyboard =====
+    document.addEventListener('keydown', (e) => {
+      keys[e.key] = true;
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (!started) { started = true; bannerActive = true; bannerPhase = 'starting'; bannerTimer = 100; return; }
+        if (gameOver || gameComplete) { reset(); return; }
+        fire();
+      }
+      if ((e.key === 'r' || e.key === 'R') && (gameOver || gameComplete)) reset();
+      // Debug: E key triggers ending instantly (any time after game started)
+      if ((e.key === 'e' || e.key === 'E') && started && !gameOver && !gameComplete) {
+        bannerActive = false;
+        bullets = [];
+        enemies = [];
+        stage = 5;
+        stageProgress = STAGES[4].target;
+        gameComplete = true;
+        endingTimer = 0;
+        score += 500;
+      }
+    });
+    document.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+    // ===== Input: touch =====
+    function getCanvasX(clientX) {
+      const rect = canvas.getBoundingClientRect();
+      return (clientX - rect.left) * (canvas.width / rect.width);
+    }
+    function updateShipFromTouch(touch) {
+      if (!started || gameOver || gameComplete) return;
+      const x = getCanvasX(touch.clientX);
+      player.x = Math.max(0, Math.min(W - player.w, x - player.w / 2));
+    }
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (!started) { started = true; touchActive = true; bannerActive = true; bannerPhase = 'starting'; bannerTimer = 100; updateShipFromTouch(e.touches[0]); return; }
+      if (gameOver || gameComplete) { reset(); touchActive = true; return; }
+      touchActive = true; updateShipFromTouch(e.touches[0]);
+    }, { passive: false });
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault(); if (!touchActive) return; updateShipFromTouch(e.touches[0]);
+    }, { passive: false });
+    canvas.addEventListener('touchend', (e) => { e.preventDefault(); touchActive = false; }, { passive: false });
+    canvas.addEventListener('touchcancel', (e) => { e.preventDefault(); touchActive = false; }, { passive: false });
+
+    // ===== Fire =====
+    function fire() {
+      if (player.cooldown > 0) return;
+      if (bannerActive || gameOver || gameComplete) return;
+      bullets.push({ x: player.x + 16, y: player.y + 40, speed: 9 });
+      bullets.push({ x: player.x + 56, y: player.y + 40, speed: 9 });
+      player.cooldown = 14;
+    }
+
+    // ===== Spawn enemy =====
+    function spawnEnemy() {
+      const stg = getStage();
+      // Reduced base speed range so high-stage speedMul doesn't make it impossible
+      const speed = (1.0 + Math.random() * 1.0) * stg.speedMul;
+      enemies.push({
+        x: 15 + Math.random() * (W - 56),
+        y: -28, w: 26, h: 26,
+        speed: speed,
+        wobble: Math.random() * Math.PI * 2,
+        rotorPhase: Math.floor(Math.random() * 2),
+        rotorTimer: Math.floor(Math.random() * 5),
+      });
+    }
+
+    // ===== Explosion =====
+    function explode(x, y, color, count) {
+      const n = count || 14;
+      for (let i = 0; i < n; i++) {
+        const angle = (Math.PI * 2 * i) / n;
+        const speed = 1 + Math.random() * 2;
+        particles.push({
+          x, y,
+          vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+          life: 30 + Math.random() * 20, color
+        });
+      }
+    }
+
+    // ===== Update =====
+    function update() {
+      frameCount++;
+      clouds.forEach(c => {
+        c.y += c.speed;
+        if (c.y > H + 60) {
+          c.y = -80; c.x = Math.random() * W;
+          c.size = 25 + Math.random() * 55;
+          c.speed = 0.4 + Math.random() * 0.7;
+          c.alpha = 0.55 + Math.random() * 0.35;
+        }
+      });
+
+      if (!started) return;
+
+      // Ending sequence after stage 5 (drama-driven, ship position handled in draw)
+      if (gameComplete) {
+        endingTimer++;
+        // Fireworks intensity by phase
+        let fwRate = 0;
+        if (endingTimer < 80) fwRate = 22;            // STAGE 5 CLEAR phase
+        else if (endingTimer < 240) fwRate = 16;      // GO AIRBILITY phase
+        else if (endingTimer < 420) fwRate = 10;      // Liftoff (intense)
+        else if (endingTimer < 600) fwRate = 22;      // Cool down
+        else fwRate = 40;                              // Settled
+        if (fwRate && endingTimer % fwRate === 0) {
+          const fx = 40 + Math.random() * (W - 80);
+          const fy = 80 + Math.random() * 380;
+          const palette = ['#ffd040', '#80f0ff', '#ff80c0', '#80ff80', '#ff8060', '#ffffff', '#c080ff'];
+          explode(fx, fy, palette[Math.floor(Math.random() * palette.length)], 16 + Math.floor(Math.random() * 10));
+        }
+        particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; });
+        particles = particles.filter(p => p.life > 0);
+        return;
+      }
+
+      // Banner showing (stage transition / starting)
+      if (bannerActive) {
+        // Allow movement
+        if (keys['ArrowLeft'] || keys['a'] || keys['A']) player.x -= player.speed;
+        if (keys['ArrowRight'] || keys['d'] || keys['D']) player.x += player.speed;
+        player.x = Math.max(0, Math.min(W - player.w, player.x));
+        bannerTimer--;
+        if (bannerTimer <= 0) {
+          if (bannerPhase === 'cleared') {
+            stage++;
+            stageProgress = 0;
+            stageSpawnCount = 0;
+            lives++;
+            bullets = []; enemies = [];
+            bannerPhase = 'starting'; bannerTimer = 70;
+          } else if (bannerPhase === 'starting') {
+            bannerActive = false; bannerPhase = 'none';
+          }
+        }
+        return;
+      }
+
+      if (gameOver) return;
+
+      // Player movement
+      if (keys['ArrowLeft'] || keys['a'] || keys['A']) player.x -= player.speed;
+      if (keys['ArrowRight'] || keys['d'] || keys['D']) player.x += player.speed;
+      player.x = Math.max(0, Math.min(W - player.w, player.x));
+
+      // Auto-fire
+      if (keys[' '] || touchActive) fire();
+      if (player.cooldown > 0) player.cooldown--;
+
+      // Bullets
+      bullets.forEach(b => b.y -= b.speed);
+      bullets = bullets.filter(b => b.y > -30);
+
+      // Spawn
+      const stg = getStage();
+      spawnTimer++;
+      if (spawnTimer >= stg.spawnFrames && stageSpawnCount < stg.target) {
+        spawnEnemy();
+        spawnTimer = 0;
+        stageSpawnCount++;
+      }
+
+      // Enemy movement + rotor animation
+      enemies.forEach(e => {
+        e.y += e.speed;
+        e.wobble += 0.05;
+        e.x += Math.sin(e.wobble) * 0.6;
+        e.rotorTimer++;
+        if (e.rotorTimer >= 5) {
+          e.rotorPhase = 1 - e.rotorPhase;
+          e.rotorTimer = 0;
+        }
+      });
+
+      // Bullet vs enemy collision
+      for (let bi = bullets.length - 1; bi >= 0; bi--) {
+        const b = bullets[bi];
+        for (let ei = enemies.length - 1; ei >= 0; ei--) {
+          const e = enemies[ei];
+          if (b.x > e.x && b.x < e.x + e.w && b.y > e.y && b.y < e.y + e.h) {
+            explode(e.x + e.w/2, e.y + e.h/2, '#f55');
+            bullets.splice(bi, 1);
+            enemies.splice(ei, 1);
+            score += stg.scoreReward;
+            stageProgress++;
+            break;
+          }
+        }
+      }
+
+      // Enemy off screen / player collision
+      const phx = player.x + 14, phy = player.y + 12;
+      const phw = player.w - 28, phh = player.h - 24;
+      enemies = enemies.filter(e => {
+        if (e.y > H) {
+          lives--;
+          stageProgress++; // count as dealt with
+          explode(e.x + e.w/2, H - 10, '#fa0');
+          return false;
+        }
+        if (e.x < phx + phw && e.x + e.w > phx &&
+            e.y < phy + phh && e.y + e.h > phy) {
+          lives--;
+          stageProgress++;
+          explode(e.x + e.w/2, e.y + e.h/2, '#fa0');
+          return false;
+        }
+        return true;
+      });
+
+      particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; });
+      particles = particles.filter(p => p.life > 0);
+
+      if (lives <= 0) gameOver = true;
+
+      // Stage clear check
+      if (stageProgress >= stg.target && !gameOver) {
+        if (stage >= 5) {
+          gameComplete = true;
+          endingTimer = 0;
+          // Big bonus
+          score += 500;
+        } else {
+          bannerActive = true;
+          bannerPhase = 'cleared';
+          bannerTimer = 90;
+        }
+      }
+    }
+
+    // ===== Drawing helpers =====
+    function drawCloud(c) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${c.alpha})`;
+      const cx = Math.floor(c.x), cy = Math.floor(c.y), s = Math.floor(c.size);
+      ctx.fillRect(cx - Math.floor(s*0.5), cy + Math.floor(s*0.05), s, Math.floor(s*0.25));
+      ctx.fillRect(cx - Math.floor(s*0.4), cy - Math.floor(s*0.12), Math.floor(s*0.8), Math.floor(s*0.22));
+      ctx.fillRect(cx - Math.floor(s*0.25), cy - Math.floor(s*0.3), Math.floor(s*0.5), Math.floor(s*0.22));
+      ctx.fillRect(cx - Math.floor(s*0.1), cy - Math.floor(s*0.42), Math.floor(s*0.3), Math.floor(s*0.18));
+    }
+
+    function drawPlayer() {
+      const glowAlpha = 0.5 + 0.4 * Math.sin(frameCount * 0.4);
+      ctx.fillStyle = `rgba(255, 200, 60, ${glowAlpha})`;
+      ctx.fillRect(player.x + 21, player.y + 51, 6, 6);
+      ctx.fillRect(player.x + 45, player.y + 51, 6, 6);
+      ctx.fillStyle = `rgba(120, 220, 255, ${glowAlpha * 0.6})`;
+      ctx.fillRect(player.x + 21, player.y + 27, 6, 6);
+      ctx.fillRect(player.x + 45, player.y + 27, 6, 6);
+      ctx.drawImage(playerSprite, Math.floor(player.x), Math.floor(player.y), player.w, player.h);
+    }
+
+    function drawEnemy(e) {
+      const sprite = e.rotorPhase ? enemySpriteB : enemySpriteA;
+      ctx.drawImage(sprite, Math.floor(e.x), Math.floor(e.y), e.w, e.h);
+    }
+
+    function drawBullet(b) {
+      const x = Math.floor(b.x), y = Math.floor(b.y);
+      ctx.fillStyle = 'rgba(255, 208, 0, 0.45)';
+      ctx.fillRect(x - 2, y + 14, 4, 5);
+      ctx.fillStyle = 'rgba(255, 208, 0, 0.22)';
+      ctx.fillRect(x - 1, y + 20, 2, 5);
+      ctx.drawImage(bulletSprite, x - 11, y - 11, 22, 22);
+    }
+
+    function drawHUD() {
+      ctx.fillStyle = 'rgba(0, 16, 35, 0.7)';
+      ctx.fillRect(0, 0, W, 60);
+      ctx.fillStyle = '#ffd040';
+      ctx.fillRect(0, 60, W, 2);
+
+      // SCORE (left)
+      ctx.fillStyle = '#ffd040';
+      ctx.font = '8px ' + PIXEL_FONT;
+      ctx.textAlign = 'left';
+      ctx.fillText('SCORE', 12, 18);
+      ctx.fillStyle = '#fff';
+      ctx.font = '13px ' + PIXEL_FONT;
+      ctx.fillText(score.toString().padStart(5, '0'), 12, 42);
+
+      // STAGE (center)
+      const stg = getStage();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#80f0ff';
+      ctx.font = '8px ' + PIXEL_FONT;
+      ctx.fillText('STAGE', W/2, 18);
+      ctx.fillStyle = '#fff';
+      ctx.font = '13px ' + PIXEL_FONT;
+      ctx.fillText(`${stage}  ${Math.min(stageProgress, stg.target)}/${stg.target}`, W/2, 42);
+
+      // LIVES (right)
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#ffd040';
+      ctx.font = '8px ' + PIXEL_FONT;
+      ctx.fillText('LIVES', W - 12, 18);
+      const iconSize = 18, iconGap = 3;
+      const showLives = Math.min(Math.max(0, lives), 5);
+      for (let i = 0; i < showLives; i++) {
+        const ix = W - 12 - (i + 1) * (iconSize + iconGap) + iconGap;
+        ctx.drawImage(playerSprite, ix, 30, iconSize, iconSize);
+      }
+      if (lives > 5) {
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px ' + PIXEL_FONT;
+        ctx.fillText('x' + lives, W - 12 - 5 * (iconSize + iconGap) - 8, 44);
+      }
+      ctx.textAlign = 'left';
+    }
+
+    function withShadow(fn) {
+      ctx.shadowColor = 'rgba(0, 16, 40, 0.85)';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 3; ctx.shadowOffsetY = 3;
+      fn();
+      ctx.shadowColor = 'transparent';
+      ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+    }
+
+    function drawBanner() {
+      // Big banner overlay in center
+      ctx.fillStyle = 'rgba(0, 16, 40, 0.55)';
+      ctx.fillRect(0, H/2 - 80, W, 160);
+      ctx.fillStyle = '#ffd040';
+      ctx.fillRect(0, H/2 - 80, W, 3);
+      ctx.fillRect(0, H/2 + 77, W, 3);
+
+      ctx.textAlign = 'center';
+      withShadow(() => {
+        if (bannerPhase === 'cleared') {
+          ctx.fillStyle = '#80f0ff';
+          ctx.font = '24px ' + PIXEL_FONT;
+          ctx.fillText('STAGE ' + stage, W/2, H/2 - 20);
+          ctx.fillStyle = '#ffd040';
+          ctx.font = '20px ' + PIXEL_FONT;
+          ctx.fillText('CLEAR!', W/2, H/2 + 15);
+          ctx.fillStyle = '#80ff80';
+          ctx.font = '11px ' + PIXEL_FONT;
+          ctx.fillText('+ 1 LIFE', W/2, H/2 + 50);
+        } else if (bannerPhase === 'starting') {
+          ctx.fillStyle = '#ffd040';
+          ctx.font = '28px ' + PIXEL_FONT;
+          ctx.fillText('STAGE ' + stage, W/2, H/2 - 10);
+          ctx.fillStyle = '#80f0ff';
+          ctx.font = '14px ' + PIXEL_FONT;
+          const stg = getStage();
+          ctx.fillText('TARGET ' + stg.target, W/2, H/2 + 30);
+          // Pulsing GO
+          const pulse = Math.floor(frameCount / 12) % 2 === 0;
+          if (pulse) {
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px ' + PIXEL_FONT;
+            ctx.fillText('GO!', W/2, H/2 + 58);
+          }
+        }
+      });
+      ctx.textAlign = 'left';
+    }
+
+    function drawEnding() {
+      const t = endingTimer;
+
+      // ===== Ship animation phases (no pulsing - stable size) =====
+      let shipScale = 1;
+      let shipOffsetY = 0;
+      let shakeX = 0, shakeY = 0;
+
+      if (t < 60) {
+        // Phase 1: STAGE 5 CLEAR! - ship stays steady
+        shipScale = 1;
+      } else if (t < 110) {
+        // Phase 2: Anticipation - ship steady (no pulse)
+        shipScale = 1;
+      } else if (t < 240) {
+        // Phase 3: GO AIRBILITY! - ship steady (no pulse), just shake
+        shipScale = 1;
+        const pT = t - 110;
+        if (pT < 40) {
+          const intensity = (40 - pT) / 40 * 4;
+          shakeX = (Math.random() - 0.5) * intensity;
+          shakeY = (Math.random() - 0.5) * intensity;
+        }
+      } else {
+        // Phase 4: LIFTOFF - ship grows + rises off screen
+        const pT = t - 240;
+        const liftP = pT / 180;
+        const eased = liftP <= 1 ? liftP * liftP : 1 + (liftP - 1) * 2;
+        shipScale = 1 + eased * 3.2;            // 1× → 4.2×+
+        shipOffsetY = -eased * (H + 200);       // moves upward off screen
+        if (pT < 70) {
+          const intensity = (70 - pT) / 70 * 5;
+          shakeX = (Math.random() - 0.5) * intensity;
+          shakeY = (Math.random() - 0.5) * intensity;
+        }
+      }
+
+      // ===== Draw fireworks/particles =====
+      particles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.min(1, p.life / 30);
+        ctx.fillRect(Math.floor(p.x) - 2, Math.floor(p.y) - 2, 4, 4);
+        ctx.globalAlpha = 1;
+      });
+
+      // ===== Draw ship =====
+      const drawSize = Math.floor(72 * shipScale);
+      const baseY = H - 95;
+      const drawX = Math.floor(W/2 - drawSize/2 + shakeX);
+      const drawY = Math.floor(baseY + shipOffsetY + shakeY);
+
+      if (drawY > -drawSize) {
+        // Engine thrust trail during liftoff only
+        if (t >= 240) {
+          const pT = t - 240;
+          const trailLen = Math.min(pT * 3, 320) * Math.min(shipScale / 2, 2.2);
+          const trailWidth = Math.max(5, drawSize * 0.08);
+          // Outer orange flame
+          ctx.fillStyle = 'rgba(255, 140, 30, 0.55)';
+          ctx.fillRect(drawX + drawSize * 0.29 - trailWidth/2, drawY + drawSize * 0.88, trailWidth, trailLen);
+          ctx.fillRect(drawX + drawSize * 0.71 - trailWidth/2, drawY + drawSize * 0.88, trailWidth, trailLen);
+          // Inner yellow core
+          ctx.fillStyle = 'rgba(255, 240, 100, 0.75)';
+          ctx.fillRect(drawX + drawSize * 0.29 - trailWidth/4, drawY + drawSize * 0.88, trailWidth/2, trailLen * 0.75);
+          ctx.fillRect(drawX + drawSize * 0.71 - trailWidth/4, drawY + drawSize * 0.88, trailWidth/2, trailLen * 0.75);
+          // Flicker layer
+          if (t % 3 === 0) {
+            ctx.fillStyle = 'rgba(255, 200, 60, 0.35)';
+            ctx.fillRect(drawX + drawSize * 0.27 - trailWidth/2, drawY + drawSize * 0.88, trailWidth * 1.4, trailLen * 0.5);
+            ctx.fillRect(drawX + drawSize * 0.73 - trailWidth/2, drawY + drawSize * 0.88, trailWidth * 1.4, trailLen * 0.5);
+          }
+        }
+
+        // Ship sprite (glow halo at large scale for hero shot)
+        if (shipScale > 2) {
+          ctx.shadowColor = 'rgba(255, 220, 100, 0.6)';
+          ctx.shadowBlur = 20;
+        }
+        ctx.drawImage(playerSprite, drawX, drawY, drawSize, drawSize);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+      }
+
+      // ===== Text overlays =====
+      ctx.textAlign = 'center';
+
+      // Phase 1: STAGE 5 CLEAR!!! (0-90)
+      if (t < 90) {
+        let alpha = 1;
+        if (t < 15) alpha = t / 15;
+        else if (t > 60) alpha = (90 - t) / 30;
+        ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+        withShadow(() => {
+          ctx.fillStyle = '#80f0ff';
+          ctx.font = '28px ' + PIXEL_FONT;
+          ctx.fillText('STAGE 5', W/2, H/3 + 10);
+          ctx.fillStyle = '#ffd040';
+          ctx.font = '34px ' + PIXEL_FONT;
+          ctx.fillText('CLEAR!!!', W/2, H/3 + 60);
+        });
+        ctx.globalAlpha = 1;
+      }
+
+      // Phase 2: MISSION COMPLETE (110-240) — comes first
+      if (t >= 110 && t < 240) {
+        const pT = t - 110;
+        let alpha = 1;
+        if (pT < 15) alpha = pT / 15;
+        else if (pT > 100) alpha = (130 - pT) / 30;
+        ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+        withShadow(() => {
+          ctx.fillStyle = '#ffd040';
+          ctx.font = '26px ' + PIXEL_FONT;
+          ctx.fillText('MISSION', W/2, H/2 - 60);
+          ctx.fillText('COMPLETE!', W/2, H/2 - 25);
+
+          if (pT > 30) {
+            ctx.fillStyle = '#80f0ff';
+            ctx.font = '10px ' + PIXEL_FONT;
+            ctx.fillText('VTOL DRONE INTERCEPTOR', W/2, H/2 + 15);
+            ctx.fillText('SKY GUARDIAN', W/2, H/2 + 37);
+          }
+          if (pT > 70) {
+            ctx.fillStyle = '#80ff80';
+            ctx.font = '10px ' + PIXEL_FONT;
+            ctx.fillText('CLEAR BONUS  + 500', W/2, H/2 + 67);
+          }
+        });
+        ctx.globalAlpha = 1;
+      }
+
+      // Phase 4: GO, AIRBILITY!!! (380-510) — appears during liftoff as departing cheer
+      if (t >= 380 && t < 510) {
+        const pT = t - 380;
+        let alpha = 1;
+        if (pT < 12) alpha = pT / 12;
+        else if (pT > 110) alpha = (130 - pT) / 20;
+        ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+
+        const textShakeX = pT < 40 ? (Math.random() - 0.5) * 3 : 0;
+        const textShakeY = pT < 40 ? (Math.random() - 0.5) * 3 : 0;
+
+        // Positioned in lower half so the rising ship doesn't overlap
+        withShadow(() => {
+          ctx.fillStyle = '#ffd040';
+          ctx.font = '28px ' + PIXEL_FONT;
+          ctx.fillText('GO,', W/2 + textShakeX, H/2 + 80 + textShakeY);
+
+          if (pT > 16) {
+            ctx.fillStyle = '#ff60a0';
+            ctx.font = '26px ' + PIXEL_FONT;
+            ctx.fillText('AIRBILITY!!!', W/2 - textShakeX, H/2 + 130 + textShakeY);
+          }
+        });
+        ctx.globalAlpha = 1;
+      }
+
+      // Phase 5: FINAL SCORE + REPLAY (550+) — after liftoff complete
+      if (t >= 550) {
+        const pT = t - 550;
+        withShadow(() => {
+          ctx.fillStyle = '#ffd040';
+          ctx.font = '14px ' + PIXEL_FONT;
+          ctx.fillText('FINAL  SCORE', W/2, H/2 - 20);
+          ctx.fillStyle = '#fff';
+          ctx.font = '32px ' + PIXEL_FONT;
+          ctx.fillText(score.toString().padStart(5, '0'), W/2, H/2 + 30);
+
+          if (pT > 80) {
+            const blink = Math.floor(frameCount / 30) % 2 === 0;
+            if (blink) {
+              ctx.fillStyle = '#80ff80';
+              ctx.font = '12px ' + PIXEL_FONT;
+              ctx.fillText(isTouchDevice ? 'TAP TO REPLAY' : 'PRESS SPACE OR R', W/2, H/2 + 100);
+            }
+          }
+        });
+      }
+
+      ctx.textAlign = 'left';
+    }
+
+    function drawStartScreen() {
+      ctx.textAlign = 'center';
+      withShadow(() => {
+        ctx.fillStyle = '#ffd040';
+        ctx.font = '28px ' + PIXEL_FONT;
+        ctx.fillText('AIRBILITY', W/2, H/2 - 130);
+        ctx.fillStyle = '#80f0ff';
+        ctx.font = '12px ' + PIXEL_FONT;
+        ctx.fillText('DRONE  INTERCEPT', W/2, H/2 - 95);
+      });
+      ctx.drawImage(playerSprite, W/2 - 56, H/2 - 60, 112, 112);
+      withShadow(() => {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '10px ' + PIXEL_FONT;
+        if (isTouchDevice) {
+          ctx.fillText('DRAG LEFT / RIGHT', W/2, H/2 + 80);
+          ctx.fillText('AUTO  FIRE', W/2, H/2 + 102);
+        } else {
+          ctx.fillText('ARROW KEYS - MOVE', W/2, H/2 + 80);
+          ctx.fillText('SPACE - FIRE', W/2, H/2 + 102);
+        }
+        ctx.fillStyle = '#80ff80';
+        ctx.font = '9px ' + PIXEL_FONT;
+        ctx.fillText('5 STAGES TO MISSION COMPLETE', W/2, H/2 + 128);
+        const blink = Math.floor(frameCount / 30) % 2 === 0;
+        if (blink) {
+          ctx.fillStyle = '#ffd040';
+          ctx.font = '14px ' + PIXEL_FONT;
+          const prompt = isTouchDevice ? 'TAP TO START' : 'PRESS SPACE';
+          ctx.fillText(prompt, W/2, H/2 + 165);
+        }
+      });
+      ctx.textAlign = 'left';
+    }
+
+    function drawGameOver() {
+      ctx.fillStyle = 'rgba(0, 10, 25, 0.78)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center';
+      withShadow(() => {
+        ctx.fillStyle = '#ff4060';
+        ctx.font = '24px ' + PIXEL_FONT;
+        ctx.fillText('MISSION', W/2, H/2 - 60);
+        ctx.fillText('FAILED', W/2, H/2 - 25);
+        ctx.fillStyle = '#80f0ff';
+        ctx.font = '10px ' + PIXEL_FONT;
+        ctx.fillText('STAGE ' + stage, W/2, H/2 + 5);
+        ctx.fillStyle = '#ffd040';
+        ctx.font = '11px ' + PIXEL_FONT;
+        ctx.fillText('FINAL  SCORE', W/2, H/2 + 35);
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px ' + PIXEL_FONT;
+        ctx.fillText(score.toString().padStart(5, '0'), W/2, H/2 + 70);
+        const blink = Math.floor(frameCount / 30) % 2 === 0;
+        if (blink) {
+          ctx.fillStyle = '#80f0ff';
+          ctx.font = '10px ' + PIXEL_FONT;
+          ctx.fillText(isTouchDevice ? 'TAP TO RESTART' : 'PRESS SPACE OR R', W/2, H/2 + 115);
+        }
+      });
+      ctx.textAlign = 'left';
+    }
+
+    function draw() {
+      // Sky gradient
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, '#2a6dad');
+      grad.addColorStop(0.5, '#5fa3d2');
+      grad.addColorStop(1, '#8fc8e8');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+      clouds.forEach(drawCloud);
+
+      if (!started) { drawStartScreen(); return; }
+
+      if (gameComplete) { drawEnding(); return; }
+
+      // Gameplay
+      bullets.forEach(drawBullet);
+      enemies.forEach(drawEnemy);
+      drawPlayer();
+      particles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.min(1, p.life / 30);
+        ctx.fillRect(Math.floor(p.x) - 2, Math.floor(p.y) - 2, 4, 4);
+        ctx.globalAlpha = 1;
+      });
+
+      drawHUD();
+
+      if (bannerActive) drawBanner();
+      if (gameOver) drawGameOver();
+    }
+
+    function loop() { update(); draw(); requestAnimationFrame(loop); }
+    loop();
+  </script>
+</body>
+</html>
