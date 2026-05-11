@@ -354,18 +354,36 @@
       // Ending sequence after stage 5 (drama-driven, ship position handled in draw)
       if (gameComplete) {
         endingTimer++;
-        // Fireworks intensity by phase
-        let fwRate = 0;
-        if (endingTimer < 80) fwRate = 22;            // STAGE 5 CLEAR phase
-        else if (endingTimer < 240) fwRate = 16;      // GO AIRBILITY phase
-        else if (endingTimer < 420) fwRate = 10;      // Liftoff (intense)
-        else if (endingTimer < 600) fwRate = 22;      // Cool down
-        else fwRate = 40;                              // Settled
+        // Fireworks buildup: sparse → climax at GO AIRBILITY (380~510) → cool down
+        let fwRate = 0;       // frames between firework spawns (lower = more)
+        let fwCount = 1;      // number of fireworks per spawn
+        let fwSize = 16;      // base particles per burst
+        if (endingTimer < 90) {
+          fwRate = 26;                                  // Stage 5 clear — light
+        } else if (endingTimer < 160) {
+          fwRate = 22;                                  // Mission complete starts — still sparse
+        } else if (endingTimer < 240) {
+          fwRate = 16;                                  // Mission complete mid — picking up
+          fwSize = 18;
+        } else if (endingTimer < 320) {
+          fwRate = 12;                                  // Liftoff begins — denser
+          fwSize = 20;
+        } else if (endingTimer < 380) {
+          fwRate = 8; fwCount = 2; fwSize = 22;         // Approaching climax
+        } else if (endingTimer < 510) {
+          fwRate = 5; fwCount = 2; fwSize = 26;         // 🎆 CLIMAX — GO AIRBILITY!!!
+        } else if (endingTimer < 600) {
+          fwRate = 14; fwSize = 18;                     // Cool down
+        } else {
+          fwRate = 30;                                  // Settled
+        }
         if (fwRate && endingTimer % fwRate === 0) {
-          const fx = 40 + Math.random() * (W - 80);
-          const fy = 80 + Math.random() * 380;
           const palette = ['#ffd040', '#80f0ff', '#ff80c0', '#80ff80', '#ff8060', '#ffffff', '#c080ff'];
-          explode(fx, fy, palette[Math.floor(Math.random() * palette.length)], 16 + Math.floor(Math.random() * 10));
+          for (let i = 0; i < fwCount; i++) {
+            const fx = 40 + Math.random() * (W - 80);
+            const fy = 60 + Math.random() * 420;
+            explode(fx, fy, palette[Math.floor(Math.random() * palette.length)], fwSize + Math.floor(Math.random() * 10));
+          }
         }
         particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; });
         particles = particles.filter(p => p.life > 0);
@@ -770,16 +788,16 @@
         const textShakeX = pT < 40 ? (Math.random() - 0.5) * 3 : 0;
         const textShakeY = pT < 40 ? (Math.random() - 0.5) * 3 : 0;
 
-        // Positioned in lower half so the rising ship doesn't overlap
+        // Center of screen (ship already lifted high, no overlap)
         withShadow(() => {
           ctx.fillStyle = '#ffd040';
-          ctx.font = '28px ' + PIXEL_FONT;
-          ctx.fillText('GO,', W/2 + textShakeX, H/2 + 80 + textShakeY);
+          ctx.font = '32px ' + PIXEL_FONT;
+          ctx.fillText('GO,', W/2 + textShakeX, H/2 - 20 + textShakeY);
 
           if (pT > 16) {
             ctx.fillStyle = '#ff60a0';
-            ctx.font = '26px ' + PIXEL_FONT;
-            ctx.fillText('AIRBILITY!!!', W/2 - textShakeX, H/2 + 130 + textShakeY);
+            ctx.font = '30px ' + PIXEL_FONT;
+            ctx.fillText('AIRBILITY!!!', W/2 - textShakeX, H/2 + 30 + textShakeY);
           }
         });
         ctx.globalAlpha = 1;
